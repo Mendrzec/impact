@@ -190,7 +190,7 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       end,
       dial_redraw = function(self)
         if self.dial == nil then
-          self.dial = ui.Dial.new(self.dial_x, self.dial_y, 8, self.get(), self.range[1], self.range[2], 1, self.range[1], {}, nil, nil)
+          self.dial = ui.Dial.new(self.dial_x, self.dial_y, 8, self.track_value, self.range[1], self.range[2], 1, self.range[1], {}, nil, nil)
         end
 
         if current_mode == mode.STEP_EDIT and step_editor.currently_pressed_step and step_editor.current_track == object.index then
@@ -267,32 +267,33 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
     end_step = 16,
     last_step = 16,
     max_step = 64,
-    roll_begin = nil,
-    roll_end = nil,
     sequence = {},
     reset_to_track_params = true,
+    -- roll specific
+    roll_enabled = false,
+    rolled_steps = 0,
 
     set_roll = function (self, roll)
       if roll == 4 or roll == 2 then
         local beat_step_base = math.floor(self.current_step / roll) * roll
-        self.roll_begin = beat_step_base + 1
-        self.begin_step = self.roll_begin
-        self.roll_end = util.clamp(beat_step_base + roll, 1, self.last_step)
-        self.end_step = self.roll_end
+        self.begin_step = beat_step_base + 1
+        self.end_step = util.clamp(beat_step_base + roll, 1, self.last_step)
       elseif roll == 1 then
-        self.roll_begin = self.current_step
-        self.begin_step = self.roll_begin
-        self.roll_end = self.current_step
-        self.end_step = self.roll_end
+        self.begin_step = self.current_step
+        self.end_step = self.current_step
       else
         print("Unsupported roll value: " .. tostring(roll))
         return false
       end
+      self.rolled_steps = self.current_step
+      self.roll_enabled = true
       return true
     end,
     reset_roll = function (self)
-      self.roll_begin = nil
-      self.roll_end = nil
+      self.begin_step = 1
+      self.end_step = self.last_step
+      self.current_step = (self.rolled_steps - 1) % self.last_step + 1
+      self.roll_enabled = false
     end
   }
 
@@ -317,7 +318,7 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
             local param_range = param.range
             self.step_params[param_index] = {
               range = param_range,
-              value = util.clamp(param:get() + delta, param_range[1], param_range[2])
+              value = util.clamp(param.track_value + delta, param_range[1], param_range[2])
             }
           end
         else
@@ -366,6 +367,11 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       end,
       reset = function (self)
         self.partial_steps = {0,0,0,0, 0,0,0,0}
+        self.current_offset = 0
+        self.current_fill = 1
+        self.edited_while_pressed = false
+        self.edited_fill_or_offset = false
+        self.step_params = {}
         self.active = false
       end,
       toggle = function(self)
@@ -716,14 +722,14 @@ function execute_partial_step()
     end
 
     if current_partial_step == InstrumentData.partials_per_step then
+      if pattern.roll_enabled then
+        pattern.rolled_steps = pattern.rolled_steps + 1
+      end
       pattern.current_step = pattern.current_step + 1
+      if pattern.current_step > pattern.end_step then
+        pattern.current_step = pattern.begin_step
+      end
       instrument:prepare_step_params()
-    end
-
-    if pattern.current_step > pattern.end_step then
-      pattern.current_step = pattern.begin_step
-      pattern.begin_step = pattern.roll_begin or 1
-      pattern.end_step = pattern.roll_end or pattern.last_step
     end
   end
 
