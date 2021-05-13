@@ -25,10 +25,12 @@ function table.shift(t, n)
       table.insert(t, table.remove(t, 1))
     end
   else
-    return
+    return false
   end
+  return true
 end
 
+local shift_pressed = false
 local mode = {
     PATTERN_SELECTION = 1,
     STEP_EDIT = 2
@@ -116,7 +118,8 @@ end
 InstrumentData = {
   partials_per_step = 4, -- used for higher resolution
   default_color = 1,
-  pressed_color = 6,
+  active_color = 5,
+  pressed_color = 15,
   index = nil,
   name = nil,
   grid_x = nil,
@@ -124,15 +127,19 @@ InstrumentData = {
   screen_x = nil,
   screen_y = nil,
   trigger_callback = nil,
+  max_params_count = 3,
   track_params = nil,
   patterns = nil,
   trigger_button = {},
   focused = false,
-  focus_button = {}
+  focus_button = {},
+  muted = false,
 }
 
 function InstrumentData:trigger()
-  self.trigger_callback(self)
+  if not self.muted then
+    self.trigger_callback(self)
+  end
 end
 
 function InstrumentData:prepare_step_params()
@@ -176,7 +183,7 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
     object.track_params[key] = {
       param_id = value.param_id,
       dial_x = object.screen_x,
-      dial_y = object.screen_y - 6 - key * 16,
+      dial_y = object.screen_y - 6 - (self.max_params_count - key + 1) * 16,
       dial = nil,
       range = params:get_range(value.param_id),
       track_value = params:get(value.param_id),
@@ -230,10 +237,13 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       self.pressed = false
     end,
     get_grid_color = function (self)
+      if object.muted then
+        return InstrumentData.default_color
+      end
       if current_mode == mode.STEP_EDIT and step_editor.current_track == object.index then
-        return not self.pressed and InstrumentData.pressed_color or InstrumentData.default_color
+        return not self.pressed and InstrumentData.pressed_color or InstrumentData.active_color
       else
-        return self.pressed and InstrumentData.pressed_color or InstrumentData.default_color
+        return self.pressed and InstrumentData.pressed_color or InstrumentData.active_color
       end
     end
   }
@@ -248,6 +258,9 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       object.focused = true
       if current_mode == mode.STEP_EDIT then
         step_editor.current_track = object.index
+      end
+      if shift_pressed then
+        object.muted = not object.muted
       end
     end,
     on_release = function (self)
@@ -340,7 +353,7 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
           return false
         end
         self.current_fill = fill
-        self:set_offset(self.current_offset)
+        table.shift(self.partial_steps, self.current_offset)
         return true
       end,
       edit_fill = function (self, fill)
@@ -351,9 +364,14 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
           end
         end
       end,
-
       set_offset = function (self, offset)
-        table.shift(self.partial_steps, offset - self.current_offset)
+        if table.shift(self.partial_steps, offset - self.current_offset) then
+          self.current_offset = offset
+        end
+      end,
+      edit_offset = function (self, offset)
+        self.edited_fill_or_offset = self:set_offset(offset)
+        self.edited_while_pressed = self.edited_fill_or_offset
       end,
 
       set = function (self)
@@ -435,7 +453,7 @@ local tracks_data = {}
 
 function init_tracks_data()
   tracks_data = {
-    InstrumentData:new(1,"BD", 1,8, 10, 64,
+    InstrumentData:new(1,"BD", 1,8, 11, 64,
       {
         {param_id = "BD level"},
         {param_id = "BD tone"},
@@ -445,7 +463,7 @@ function init_tracks_data()
         engine.kick_trigger()
       end
     ),
-    InstrumentData:new(2,"SD", 2,8, 25, 64,
+    InstrumentData:new(2,"SD", 2,8, 26, 64,
       {
         {param_id = "SD level"},
         -- {param_id = "SD tone"},
@@ -456,7 +474,7 @@ function init_tracks_data()
         engine.snare_trigger()
       end
     ),
-    InstrumentData:new(3,"MT", 3,8, 40, 64,
+    InstrumentData:new(3,"MT", 3,8, 41, 64,
       {
         {param_id = "MT level"},
         {param_id = "MT tone"},
@@ -466,7 +484,7 @@ function init_tracks_data()
         engine.mt_trigger()
       end
     ),
-    InstrumentData:new(4,"CH", 4,8, 55, 64,
+    InstrumentData:new(4,"CH", 4,8, 56, 64,
       {
         {param_id = "CH level"},
         {param_id = "CH tone"},
@@ -476,7 +494,7 @@ function init_tracks_data()
         engine.ch_trigger()
       end
     ),
-  InstrumentData:new(5,"OH", 5,8, 70, 64,
+  InstrumentData:new(5,"OH", 5,8, 71, 64,
       {
         {param_id = "OH level"},
         {param_id = "OH tone"},
@@ -486,7 +504,7 @@ function init_tracks_data()
         engine.oh_trigger()
       end
     ),
-    InstrumentData:new(6,"CP", 6,8, 85, 64,
+    InstrumentData:new(6,"CP", 6,8, 86, 64,
       {
         {param_id = "CP level"}
       },
@@ -494,7 +512,7 @@ function init_tracks_data()
         engine.clap_trigger()
       end
     ),
-    InstrumentData:new(7,"CW", 7,8, 100, 64,
+    InstrumentData:new(7,"CW", 7,8, 101, 64,
       {
         {param_id = "CW level"}
       },
@@ -502,7 +520,7 @@ function init_tracks_data()
         engine.cowbell_trigger()
       end
     ),
-    InstrumentData:new(8,"RS", 8,8, 115, 64,
+    InstrumentData:new(8,"RS", 8,8, 116, 64,
       {
         {param_id = "RS level"}
       },
@@ -550,11 +568,7 @@ function init_utility_buttons()
       paused_color = 5,
       playing_color = 15,
       get_grid_color = function (self)
-        if current_playback_mode == playback_mode.PLAYING then
-          return self.playing_color
-        else
-          return self.default_color
-        end
+        return current_playback_mode == playback_mode.PLAYING and self.playing_color or self.default_color
       end
     },
     {
@@ -585,25 +599,38 @@ function init_utility_buttons()
       default_color = 1,
       pressed_color = 15,
       get_grid_color = function (self)
-        if self.pressed then
-          return self.pressed_color
-        else
-          return self.default_color
-        end
+        return self.pressed and self.pressed_color or self.default_color
+      end
+    },
+    {
+      name = "shift",
+      grid_x = 4,
+      grid_y = 2,
+      pressed = false,
+      on_press = function (self)
+        self.pressed = true
+        shift_pressed = true
+      end,
+      on_release = function (self)
+        self.pressed = false
+        shift_pressed = false
+      end,
+      get_grid_color = function (self)
+        return self.pressed and 15 or 1
       end
     }
   }
 
-  local roll_fill_shift_per_button = {
-    {4, 1, 1}, {2, 2, 2}, {1, 4, 3}
+  local roll_fill_offset_per_button = {
+    {nil, nil, 0},{4, 1, 1}, {2, 2, 2}, {1, 4, 3}
   }
 
-  for key,data in ipairs(roll_fill_shift_per_button) do
-    -- roll over 1 beat OR fill step with 1 partial step OR shift partials steps by 1, etc.
-    local roll, fill, shift = data[1], data[2], data[3]
+  for key,data in ipairs(roll_fill_offset_per_button) do
+    -- roll over 1 beat OR fill step with 1 partial step OR offset partials steps by 1, etc.
+    local roll, fill, offset = data[1], data[2], data[3]
     table.insert(utility_buttons, {
-      name = "roll" .. roll,
-      grid_x = 6 + key - 1,
+      name = "roll" .. (roll or ""),
+      grid_x = 5 + key - 1,
       grid_y = 2,
       default_color = 1,
       active_color = 4,
@@ -611,12 +638,19 @@ function init_utility_buttons()
       pressed = false,
       on_press = function (self)
         self.pressed = true
+        
         if step_editor.currently_pressed_step ~= nil then
-          tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step]:edit_fill(fill)
-          return
+          if offset ~= nil and shift_pressed then
+            tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step]:edit_offset(offset)
+            return
+          end
+          if fill ~= nil then
+            tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step]:edit_fill(fill)
+            return
+          end
         end
 
-        if current_playback_mode == playback_mode.PLAYING then
+        if roll ~= nil and current_playback_mode == playback_mode.PLAYING then
           for key,track_data in ipairs(tracks_data) do
             track_data.patterns[pattern_selector.current_pattern]:set_roll(roll)
           end
@@ -625,7 +659,8 @@ function init_utility_buttons()
 
       on_release = function (self)
         self.pressed = false
-        if step_editor.currently_pressed_step == nil then
+
+        if roll ~= nil and step_editor.currently_pressed_step == nil then
           for key,track_data in ipairs(tracks_data) do
             track_data.patterns[pattern_selector.current_pattern]:reset_roll()
           end
@@ -633,14 +668,21 @@ function init_utility_buttons()
       end,
 
       get_grid_color = function (self)
-        if step_editor.currently_pressed_step ~= nil and
-            tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step].current_fill == fill then
-          return self.active_color
-        elseif self.pressed then
-          return self.pressed_color
-        else
-          return self.default_color
+        if step_editor.currently_pressed_step ~= nil then
+          local step = tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step]
+          if offset ~= nil and shift_pressed then
+              return step.current_offset == offset and self.active_color or self.default_color
+          end
+          if fill ~= nil then
+            return step.current_fill == fill and self.active_color or self.default_color
+          end
         end
+  
+        if roll ~= nil then
+          return self.pressed and self.pressed_color or self.default_color
+        end
+        
+        return 0
       end
     })
   end
@@ -786,7 +828,7 @@ function redraw()
     screen.aa(0)
 
     ui_utils.draw_track_vertical_line(track_data.screen_x)
-    ui_utils.draw_inv_label(track_data.screen_x, track_data.screen_y, track_data.name, step_editor.current_track == key)
+    ui_utils.draw_inv_label(track_data.screen_x, track_data.screen_y, track_data.name, step_editor.current_track == key, track_data.muted)
 
     screen.stroke()
   end
@@ -872,6 +914,7 @@ function g.key(x, y, state)
         tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_index]:on_release()
       end
       grid_dirty = true
+      screen_dirty = true
       return
     end
   end
@@ -879,14 +922,14 @@ end
 
 function enc(n,d)
   if step_editor.currently_pressed_step then
-    tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step]:param_delta(3 - n + 1, d)
+    tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step]:param_delta(n, d)
     screen_dirty = true
     return
   end
 
   for key,track in ipairs(tracks_data) do
     if track.focused then
-      track.track_params[3 - n + 1]:track_param_delta(d)
+      track.track_params[n]:track_param_delta(d)
     end
   end
 end

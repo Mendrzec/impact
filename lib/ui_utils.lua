@@ -32,16 +32,22 @@ function ui_utils.draw_last_vertical_line(x)
   screen.stroke()
 end
 
-function ui_utils.draw_inv_label(x, y, text, highlight)
-  screen.level(highlight == true and 15 or 5)
-  screen.rect(x - 4, y - 7, 16, 7)
-  screen.fill()
-  screen.stroke()
-  screen.blend_mode(13)
-  screen.level(highlight == true and 14 or 4)
-  screen.move(x, y - 1)
-  screen.text(text)
-  screen.blend_mode(2)
+function ui_utils.draw_inv_label(x, y, text, highlight, disabled)
+  if disabled == true then
+    screen.level(5)
+    screen.move(x, y - 1)
+    screen.text(text)
+  else
+    screen.level(highlight == true and 15 or 5)
+    screen.rect(x - 4, y - 7, 16, 7)
+    screen.fill()
+    screen.stroke()
+    screen.blend_mode(13)
+    screen.level(highlight == true and 14 or 4)
+    screen.move(x, y - 1)
+    screen.text(text)
+    screen.blend_mode(2)
+  end
 end
 
 return ui_utils
