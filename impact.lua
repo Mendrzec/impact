@@ -30,6 +30,23 @@ function table.shift(t, n)
   return true
 end
 
+-- TODO clean up globals
+-- globals
+local playback_mode = {
+  STOPPED = 4,
+  PLAYING = 1,
+  PAUSED = 3
+}
+local recording_mode = {
+  NOT_RECORDING = 1,
+  RECORDING = 2,
+  RECORDING_UNQUANTIZED = 3
+}
+
+local current_playback_mode = playback_mode.STOPPED
+local current_recording_mode = recording_mode.NOT_RECORDING
+
+local currently_focused_track = nil
 local shift_pressed = false
 local mode = {
     PATTERN_SELECTION = 1,
@@ -39,10 +56,14 @@ local current_mode = mode.STEP_EDIT
 local pattern_selector = {
   current_pattern = 1
 }
+local tracks_buttons_grid_map = {}
+local tracks_data = {}
+
+local pages_buttons_grid_map = {}
 step_editor = {
   default_color = 1,
-  edited_params_color = 7,
-  active_color = 10,
+  edited_params_color = 6,
+  active_color = 9,
   currently_playing_color = 13,
   pressed_color = 15,
 
@@ -52,13 +73,24 @@ step_editor = {
   current_page = 1,
   current_track = 1,
   currently_pressed_step = nil,
+  pattern_follow = false,
+  pattern_follow_tick = function (self)
+    if self.pattern_follow then
+      local current_step = tracks_data[self.current_track].patterns[pattern_selector.current_pattern].current_step
+      -- replace with ifs on perfromance problems
+      self.current_page = math.floor((current_step - 1)/ step_editor.steps_per_page) + 1
+    end
+  end,
 
   grid_rows = 2,
   grid_row_length = 8,
   grid_start_x = 1,
-  grid_start_y = 3,
+  grid_start_y = 4,
   step_to_grid_xy_map = {},
-  grid_xy_to_step_map = {}
+  grid_xy_to_step_map = {},
+  pages_grid_start_x = 5,
+  pages_grid_start_y = 2,
+  pages_buttons = {}
 }
 
 function step_editor:init()
@@ -81,12 +113,58 @@ function step_editor:init()
   local y = 0
   for step_index=1,self.total_steps do
     self.step_to_grid_xy_map[step_index] = {x + self.grid_start_x, y + self.grid_start_y}
-
     x = x + 1
-    if x >= self.grid_row_length then
+    if step_index % self.grid_row_length == 0 then
       x = 0
       y = y + 1
     end
+    if step_index % self.steps_per_page == 0 then
+      y = 0
+    end
+  end
+
+  for page_button_index=1,self.page_count do
+    self.pages_buttons[page_button_index] = {
+      grid_x = self.pages_grid_start_x + page_button_index - 1,
+      grid_y = self.pages_grid_start_y,
+      pressed = false,
+      press_timer = nil,
+      long_press = function (self)
+        clock.sleep(0.5)
+        if page_button_index == 1 then
+          step_editor.pattern_follow = true
+        end
+        self.press_timer = nil
+      end,
+      on_press = function (self)
+        self.pressed = true
+        self.press_timer = clock.run(self.long_press, self)
+      end,
+      on_release = function (self)
+        self.pressed = false
+
+        if self.press_timer then
+          clock.cancel(self.press_timer)
+          step_editor.current_page = page_button_index
+          step_editor.pattern_follow = false
+        end
+      end,
+      get_grid_color = function (self)
+        -- pressed or being viewed page
+        if self.pressed or step_editor.current_page == page_button_index then
+          return step_editor.pattern_follow and step_editor.currently_playing_color or step_editor.pressed_color
+        end
+        -- currently playing or active page - active means that it is non empty
+        local current_pattern = tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern]
+        if current_playback_mode == playback_mode.PLAYING
+            and (math.floor((current_pattern.current_step - 1)/ step_editor.steps_per_page) + 1) == page_button_index then
+          return step_editor.currently_playing_color
+        elseif math.floor((current_pattern.last_step - 1)/ step_editor.steps_per_page) + 1 >= page_button_index then
+          return step_editor.edited_params_color
+        end
+        return step_editor.default_color
+      end
+    }
   end
 
 end
@@ -117,8 +195,8 @@ end
 -- TODO consider renaming to TrackData
 InstrumentData = {
   partials_per_step = 4, -- used for higher resolution
+  disabled_color = 0,
   default_color = 1,
-  active_color = 5,
   pressed_color = 15,
   index = nil,
   name = nil,
@@ -238,12 +316,12 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
     end,
     get_grid_color = function (self)
       if object.muted then
-        return InstrumentData.default_color
+        return InstrumentData.disabled_color
       end
       if current_mode == mode.STEP_EDIT and step_editor.current_track == object.index then
-        return not self.pressed and InstrumentData.pressed_color or InstrumentData.active_color
+        return not self.pressed and InstrumentData.pressed_color or InstrumentData.default_color
       else
-        return self.pressed and InstrumentData.pressed_color or InstrumentData.active_color
+        return self.pressed and InstrumentData.pressed_color or InstrumentData.default_color
       end
     end
   }
@@ -255,17 +333,22 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
 
     on_press = function (self)
       self.pressed = true
-      object.focused = true
-      if current_mode == mode.STEP_EDIT then
-        step_editor.current_track = object.index
-      end
       if shift_pressed then
         object.muted = not object.muted
+        return
+      end
+      object.focused = true
+      currently_focused_track = object.index
+      if current_mode == mode.STEP_EDIT then
+        step_editor.current_track = object.index
       end
     end,
     on_release = function (self)
       self.pressed = false
       object.focused = false
+      if currently_focused_track == object.index then
+        currently_focused_track = nil
+      end
     end,
     get_grid_color = function(self)
       return self.pressed and InstrumentData.pressed_color or InstrumentData.default_color
@@ -303,10 +386,12 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       return true
     end,
     reset_roll = function (self)
-      self.begin_step = 1
-      self.end_step = self.last_step
-      self.current_step = (self.rolled_steps - 1) % self.last_step + 1
-      self.roll_enabled = false
+      if self.roll_enabled then
+        self.begin_step = 1
+        self.end_step = self.last_step
+        self.current_step = (self.rolled_steps - 1) % self.last_step + 1
+        self.roll_enabled = false
+      end
     end
   }
 
@@ -411,16 +496,28 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
 
       on_press = function (self)
         self.pressed = true
+        if last_step_pressed then
+          pattern.last_step = i
+          pattern.end_step = i
+          return
+        end
+
         step_editor.currently_pressed_step = i
         self.press_timer = clock.run(self.long_press, self)
       end,
       on_release = function (self)
         self.pressed = false
-        step_editor.currently_pressed_step = nil
-        if not self.active then
-          self:set()
+        if last_step_pressed then
           return
         end
+
+        if step_editor.currently_pressed_step == i then
+          step_editor.currently_pressed_step = nil
+        end
+        -- if not self.active then
+        --   self:set()
+        --   return
+        -- end
         if self.edited_while_pressed then
           self.edited_while_pressed = false
           return
@@ -432,8 +529,13 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       end,
 
       get_grid_color = function (self)
-        if self.pressed then
+        if self.pressed and self.active then
           return step_editor.pressed_color
+        elseif current_playback_mode == playback_mode.PLAYING and i == pattern.current_step then
+          -- TODO make const globals for brightness levels
+          return step_editor.currently_playing_color
+        elseif last_step_pressed then
+          return i == pattern.last_step and step_editor.active_color or step_editor.default_color
         elseif self.active and not self.edited_fill_or_offset and next(self.step_params) == nil then
           return step_editor.active_color
         elseif self.active and (self.edited_fill_or_offset or next(self.step_params) ~= nil) then
@@ -447,9 +549,6 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
 
   return object
 end
-
-local tracks_buttons_grid_map = {}
-local tracks_data = {}
 
 function init_tracks_data()
   tracks_data = {
@@ -531,24 +630,12 @@ function init_tracks_data()
   }
 end
 
-local playback_mode = {
-  STOPPED = 4,
-  PLAYING = 1,
-  PAUSED = 3
-}
-local recording_mode = {
-  NOT_RECORDING = 1,
-  RECORDING = 2,
-  RECORDING_UNQUANTIZED = 3
-}
-
-local current_playback_mode = playback_mode.STOPPED
-local current_recording_mode = recording_mode.NOT_RECORDING
-
 local utility_buttons_grid_map = {}
 local utility_buttons = {}
 
 function init_utility_buttons()
+  -- TODO make each utility an object and then put into a table for easy access by grid
+  -- TODO this will allow to use play_pause_button.pressed in the code, and skip globals
   utility_buttons = {
     {
       name = "play/pause",
@@ -605,7 +692,7 @@ function init_utility_buttons()
     {
       name = "shift",
       grid_x = 4,
-      grid_y = 2,
+      grid_y = 3,
       pressed = false,
       on_press = function (self)
         self.pressed = true
@@ -616,6 +703,25 @@ function init_utility_buttons()
         shift_pressed = false
       end,
       get_grid_color = function (self)
+        -- TODO make const globals for brightness levels
+        return self.pressed and 15 or 1
+      end
+    },
+    {
+      name = "last_step",
+      grid_x = 4,
+      grid_y = 2,
+      pressed = false,
+      on_press = function (self)
+        self.pressed = true
+        last_step_pressed = true
+      end,
+      on_release = function (self)
+        self.pressed = false
+        last_step_pressed = false
+      end,
+      get_grid_color = function (self)
+        -- TODO make const globals for brightness levels
         return self.pressed and 15 or 1
       end
     }
@@ -631,14 +737,14 @@ function init_utility_buttons()
     table.insert(utility_buttons, {
       name = "roll" .. (roll or ""),
       grid_x = 5 + key - 1,
-      grid_y = 2,
+      grid_y = 3,
       default_color = 1,
-      active_color = 4,
+      active_color = 5,
       pressed_color = 15,
       pressed = false,
       on_press = function (self)
         self.pressed = true
-        
+
         if step_editor.currently_pressed_step ~= nil then
           if offset ~= nil and shift_pressed then
             tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step]:edit_offset(offset)
@@ -651,6 +757,10 @@ function init_utility_buttons()
         end
 
         if roll ~= nil and current_playback_mode == playback_mode.PLAYING then
+          if currently_focused_track ~= nil then
+            tracks_data[currently_focused_track].patterns[pattern_selector.current_pattern]:set_roll(roll)
+            return
+          end
           for key,track_data in ipairs(tracks_data) do
             track_data.patterns[pattern_selector.current_pattern]:set_roll(roll)
           end
@@ -661,6 +771,10 @@ function init_utility_buttons()
         self.pressed = false
 
         if roll ~= nil and step_editor.currently_pressed_step == nil then
+          if currently_focused_track ~= nil then
+            tracks_data[currently_focused_track].patterns[pattern_selector.current_pattern]:reset_roll(roll)
+            return
+          end
           for key,track_data in ipairs(tracks_data) do
             track_data.patterns[pattern_selector.current_pattern]:reset_roll()
           end
@@ -677,11 +791,11 @@ function init_utility_buttons()
             return step.current_fill == fill and self.active_color or self.default_color
           end
         end
-  
+
         if roll ~= nil then
           return self.pressed and self.pressed_color or self.default_color
         end
-        
+
         return 0
       end
     })
@@ -737,6 +851,13 @@ function init()
   end
 
   step_editor:init()
+  -- init step editor buttons
+  for key,value in ipairs(step_editor.pages_buttons) do
+    if pages_buttons_grid_map[value.grid_x] == nil then
+      pages_buttons_grid_map[value.grid_x] = {}
+    end
+    pages_buttons_grid_map[value.grid_x][value.grid_y] = value
+  end
 
   -- init utility buttons
   for key,value in ipairs(utility_buttons) do
@@ -758,9 +879,9 @@ function execute_partial_step()
 
     if pattern.sequence[pattern.current_step].partial_steps[current_partial_step] == 1 then
       instrument:trigger()
-      instrument.pressed = true
+      instrument.trigger_button.pressed = true
     else
-      instrument.pressed = false
+      instrument.trigger_button.pressed = false
     end
 
     if current_partial_step == InstrumentData.partials_per_step then
@@ -777,6 +898,7 @@ function execute_partial_step()
 
   if current_partial_step == InstrumentData.partials_per_step then
     current_partial_step = 1
+    step_editor:pattern_follow_tick()
   else
     current_partial_step = current_partial_step + 1
   end
@@ -857,13 +979,11 @@ function grid_redraw()
       local x, y = step_editor:index_to_grid_xy(i)
       g:led(x, y, current_pattern.sequence[i]:get_grid_color())
     end
+  end
 
-    if current_playback_mode == playback_mode.PLAYING then
-      if step_editor:is_index_in_current_view_range(current_pattern.current_step) then
-        local x, y = step_editor:index_to_grid_xy(current_pattern.current_step)
-        g:led(x, y, step_editor.currently_playing_color)
-      end
-    end
+  -- ligth pages buttons
+  for key,value in ipairs(step_editor.pages_buttons) do
+    g:led(value.grid_x, value.grid_y, value:get_grid_color())
   end
 
   -- ligth utility buttons
@@ -875,6 +995,22 @@ function grid_redraw()
 end
 
 function g.key(x, y, state)
+  local page_button
+  if pages_buttons_grid_map[x] then
+    page_button = pages_buttons_grid_map[x][y]
+  end
+  if page_button ~= nil then
+    if state == 1 then
+      page_button:on_press()
+    else
+      page_button:on_release()
+    end
+    grid_dirty = true
+    screen_dirty = true
+    return
+  end
+
+
   local utility_button
   if utility_buttons_grid_map[x] then
     utility_button = utility_buttons_grid_map[x][y]
