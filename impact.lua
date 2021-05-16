@@ -905,6 +905,7 @@ function execute_partial_step()
 
   if current_playback_mode == playback_mode.PLAYING then
     grid_dirty = true
+    screen_dirty = true
   end
 end
 
@@ -926,19 +927,25 @@ end
 function redraw()
   screen.clear()
 
-  playback = ui.PlaybackIcon.new(0,0,5,current_playback_mode)
+  playback = ui.PlaybackIcon.new(0,1,5,current_playback_mode)
   playback:redraw()
-  ui_utils.draw_rec(7, 5, current_recording_mode ~= recording_mode.NOT_RECORDING)
+  ui_utils.draw_rec(7, 6, current_recording_mode ~= recording_mode.NOT_RECORDING)
+  ui_utils.draw_bpm(22, 6, params:get("bpm"), false)
 
-  screen.level(4)
-  screen.move(0,8)
-  screen.line(128,8)
-  screen.move(20, 5)
-  screen.text("P:" .. tostring(pattern_selector.current_pattern))
-  screen.move(45, 5)
-  screen.text("BPM:" .. tostring(params:get("bpm")))
+  local pressed_step = step_editor.currently_pressed_step
+  if pressed_step == nil then
+    ui_utils.draw_inv_value(54, 6, "P:" .. tostring(pattern_selector.current_pattern), false, false, 2, 2)
+    ui_utils.draw_inv_value(70, 6, "T:" .. tostring(step_editor.current_track), true, false, 2, 2)
+    local current_pattern = tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern]
+    ui_utils.draw_pages(85, 6, step_editor.current_page, current_pattern.current_step, current_pattern.last_step, step_editor.pattern_follow)
+  else
+    ui_utils.draw_inv_value(54, 6, "S:" .. tostring(pressed_step < 10 and "0" or "") .. tostring(pressed_step), true, false, 2, 2)
+    ui_utils.draw_inv_value(74, 6, "FILL", true, false, 2, 2)
+    local current_step = tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern].sequence[pressed_step]
+    ui_utils.draw_partial_steps(88, 6, current_step.partial_steps)
+  end
+
   screen.stroke()
-
   local last_track_x
   for key,track_data in ipairs(tracks_data) do
     last_track_x = track_data.screen_x
@@ -949,7 +956,7 @@ function redraw()
     end
     screen.aa(0)
 
-    ui_utils.draw_track_vertical_line(track_data.screen_x)
+    ui_utils.draw_track_vertical_line(track_data.screen_x, key == 1)
     ui_utils.draw_inv_label(track_data.screen_x, track_data.screen_y, track_data.name, step_editor.current_track == key, track_data.muted)
 
     screen.stroke()
