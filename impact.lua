@@ -156,7 +156,7 @@ function step_editor:init()
         end
         -- currently playing or active page - active means that it is non empty
         local current_pattern = tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern]
-        if current_playback_mode == playback_mode.PLAYING
+        if current_playback_mode ~= playback_mode.STOPPED
             and (math.floor((current_pattern.current_step - 1)/ step_editor.steps_per_page) + 1) == page_button_index then
           return step_editor.currently_playing_color
         elseif math.floor((current_pattern.last_step - 1)/ step_editor.steps_per_page) + 1 >= page_button_index then
@@ -307,6 +307,10 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
     on_press = function (self)
       self.pressed = true
       object:trigger()
+      if current_recording_mode == recording_mode.RECORDING and current_playback_mode == playback_mode.PLAYING then
+        local pattern = object.patterns[pattern_selector.current_pattern]
+        pattern.sequence[pattern.current_step]:set()
+      end
       if current_mode == mode.STEP_EDIT then
         step_editor.current_track = object.index
       end
@@ -531,7 +535,7 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       get_grid_color = function (self)
         if self.pressed and self.active then
           return step_editor.pressed_color
-        elseif current_playback_mode == playback_mode.PLAYING and i == pattern.current_step then
+        elseif current_playback_mode ~= playback_mode.STOPPED and i == pattern.current_step then
           -- TODO make const globals for brightness levels
           return step_editor.currently_playing_color
         elseif last_step_pressed then
@@ -638,29 +642,66 @@ function init_utility_buttons()
   -- TODO this will allow to use play_pause_button.pressed in the code, and skip globals
   utility_buttons = {
     {
-      name = "play/pause",
-      grid_x = 2,
+      name = "rec",
+      grid_x = 1,
       grid_y = 1,
+      pressed = false,
       on_press = function (self)
-          -- if current_playback_mode == playback_mode.PLAYING then
-          --   clk:stop()
-          --   current_partial_step = 1
-          -- else
+        self.pressed = true
+        if current_recording_mode == recording_mode.RECORDING then
+          current_recording_mode = recording_mode.NOT_RECORDING
+        else
+          current_recording_mode = recording_mode.RECORDING
+        end
+      end,
+      on_release = function (self)
+        self.pressed = false
+      end,
+      default_color = 1,
+      recording_color = 10,
+      get_grid_color = function (self)
+        if current_recording_mode == recording_mode.RECORDING then
+          return self.recording_color
+        else
+          return self.default_color
+        end
+      end
+    },
+    {
+      name = "play/pause",
+      grid_x = 3,
+      grid_y = 1,
+      pressed = false,
+      on_press = function (self)
+        self.pressed = true
+          if current_playback_mode == playback_mode.PLAYING then
+            clk:stop()
+            current_partial_step = 1
+            current_playback_mode = playback_mode.PAUSED
+          else
             clk:start()
             current_playback_mode = playback_mode.PLAYING
-          -- end
+          end
       end,
-      on_release = function (self) end,
+      on_release = function (self)
+        self.pressed = false
+      end,
       default_color = 1,
       paused_color = 5,
       playing_color = 15,
       get_grid_color = function (self)
-        return current_playback_mode == playback_mode.PLAYING and self.playing_color or self.default_color
+        if current_playback_mode == playback_mode.PLAYING then
+          return self.playing_color
+        elseif current_playback_mode == playback_mode.PAUSED then
+          return self.paused_color
+        else
+          return self.default_color
+        end
       end
     },
     {
       name = "stop",
-      grid_x = 1,
+      grid_x = 2,
       grid_y = 1,
       pressed = false,
       on_press = function (self)
@@ -672,12 +713,6 @@ function init_utility_buttons()
         for k,instrument in ipairs(tracks_data) do
           local pattern = instrument.patterns[pattern_selector.current_pattern]
           pattern.current_step = 1
-          -- if pattern.reset_to_track_params then
-          --   for key,param in ipairs(instrument.track_params) do
-          --     param:reset()
-          --   end
-          --   pattern.reset_to_track_params = false
-          -- end
         end
       end,
       on_release = function (self)
@@ -1002,6 +1037,21 @@ function grid_redraw()
 end
 
 function g.key(x, y, state)
+  local track
+  if tracks_buttons_grid_map[x] then
+    track = tracks_buttons_grid_map[x][y]
+  end
+  if track ~= nil then
+    if state == 1 then
+      track:on_press()
+    else
+      track:on_release()
+    end
+    grid_dirty = true
+    screen_dirty = true
+    return
+  end
+
   local page_button
   if pages_buttons_grid_map[x] then
     page_button = pages_buttons_grid_map[x][y]
@@ -1027,21 +1077,6 @@ function g.key(x, y, state)
       utility_button:on_press()
     else
       utility_button:on_release()
-    end
-    grid_dirty = true
-    screen_dirty = true
-    return
-  end
-
-  local track
-  if tracks_buttons_grid_map[x] then
-    track = tracks_buttons_grid_map[x][y]
-  end
-  if track ~= nil then
-    if state == 1 then
-      track:on_press()
-    else
-      track:on_release()
     end
     grid_dirty = true
     screen_dirty = true
