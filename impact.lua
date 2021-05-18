@@ -1,14 +1,16 @@
 -- impact
+-- v1.0.0 @Mendrzec
+--
+-- 8 track drum machine
 
 local ui = require "ui"
 
 engine.name = "Impact"
 
 local impact_params = include("lib/impact_params")
--- local step_editor = include("lib/step_editor")
 local ui_utils = include("lib/ui_utils")
 
-local grid = include("midigrid/lib/mg_128")
+--local grid = include("midigrid/lib/mg_128")
 local g = grid.connect()
 
 local MIDI_Clock = require "beatclock"
