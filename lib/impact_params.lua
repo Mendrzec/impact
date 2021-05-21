@@ -1,3 +1,4 @@
+local music = require "musicutil"
 local impact_params = {}
 function impact_params:init()
   params:add_separator("clock parameters")
@@ -8,13 +9,12 @@ function impact_params:init()
       type = "number",
       id = "BD tone",
       name = "BD tone",
-      min = 45,
-      max = 300,
-      default = 60,
+      min = 24, -- C1
+      max = 60, -- C4
+      default = 36, -- C2
       action = function(x)
-          selected = 1
-          engine.kick_tone(x)
-          redraw()
+          engine.kick_tone(music.note_num_to_freq(x))
+          screen_dirty = true
       end
   }
   params:add {
@@ -25,9 +25,8 @@ function impact_params:init()
       max = 35,
       default = 25,
       action = function(x)
-          selected = 1
           engine.kick_decay(x)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
@@ -36,22 +35,22 @@ function impact_params:init()
       name = "BD level",
       min = 0,
       max = 100,
-      default = 100,
+      default = 90,
       action = function(x)
           engine.kick_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
       type = "number",
       id = "MT tone",
       name = "MT tone",
-      min = 80,
-      max = 240,
-      default = 120,
+      min = 36, -- C2
+      max = 72, -- C5
+      default = 48, -- C3
       action = function(x)
-          engine.mt_tone(x)
-          redraw()
+          engine.mt_tone(music.note_num_to_freq(x))
+          screen_dirty = true
       end
   }
   params:add {
@@ -62,9 +61,8 @@ function impact_params:init()
       max = 35,
       default = 12,
       action = function(x)
-          selected = 2
           engine.mt_decay(x)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
@@ -73,23 +71,22 @@ function impact_params:init()
       name = "MT level",
       min = 0,
       max = 100,
-      default = 90,
+      default = 50,
       action = function(x)
           engine.mt_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
       type = "number",
       id = "CH tone",
       name = "CH tone",
-      min = 50,
-      max = 999,
-      default = 500,
+      min = 60, -- C4
+      max = 96, -- C7
+      default = 72, -- C5,
       action = function(x)
-          selected = 2
-          engine.ch_tone(x)
-          redraw()
+          engine.ch_tone(music.note_num_to_freq(x))
+          screen_dirty = true
       end
   }
   params:add {
@@ -100,9 +97,8 @@ function impact_params:init()
       max = 30,
       default = 15,
       action = function(x)
-          selected = 2
           engine.ch_decay(x / 10)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
@@ -111,23 +107,22 @@ function impact_params:init()
       name = "CH level",
       min = 0,
       max = 100,
-      default = 90,
+      default = 75,
       action = function(x)
           engine.ch_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
       type = "number",
       id = "OH tone",
       name = "OH tone",
-      min = 50,
-      max = 999,
-      default = 400,
+      min = 57, -- A3
+      max = 96, -- C7
+      default = 69, -- A4
       action = function(x)
-          selected = 3
-          engine.oh_tone(x)
-          redraw()
+          engine.oh_tone(music.note_num_to_freq(x))
+          screen_dirty = true
       end
   }
   params:add {
@@ -138,9 +133,8 @@ function impact_params:init()
       max = 40,
       default = 15,
       action = function(x)
-          selected = 3
           engine.oh_decay(x / 10)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
@@ -149,23 +143,22 @@ function impact_params:init()
       name = "OH level",
       min = 0,
       max = 100,
-      default = 80,
+      default = 75,
       action = function(x)
           engine.oh_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
       type = "number",
       id = "SD tone",
       name = "SD tone",
-      min = 50,
-      max = 1000,
-      default = 300,
+      min = 45, -- A2
+      max = 84, -- C6
+      default = 60, -- C4
       action = function(x)
-          selected = 4
-          engine.snare_tone(x)
-          redraw()
+          engine.snare_tone(music.note_num_to_freq(x))
+          screen_dirty = true
       end
   }
   params:add {
@@ -176,9 +169,8 @@ function impact_params:init()
       max = 300,
       default = 130,
       action = function(x)
-          selected = 4
           engine.snare_snappy(x / 100)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
@@ -190,7 +182,7 @@ function impact_params:init()
     default = 30,
     action = function(x)
         engine.snare_decay(x/10)
-        redraw()
+        screen_dirty = true
     end
 }
   params:add {
@@ -202,7 +194,7 @@ function impact_params:init()
       default = 70,
       action = function(x)
           engine.snare_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
@@ -211,10 +203,10 @@ function impact_params:init()
       name = "CP level",
       min = 0,
       max = 100,
-      default = 50,
+      default = 75,
       action = function(x)
           engine.clap_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
@@ -223,10 +215,10 @@ function impact_params:init()
       name = "CW level",
       min = 0,
       max = 100,
-      default = 40,
+      default = 35,
       action = function(x)
           engine.cowbell_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
   params:add {
@@ -238,7 +230,7 @@ function impact_params:init()
       default = 30,
       action = function(x)
           engine.claves_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
     params:add {
@@ -247,10 +239,10 @@ function impact_params:init()
       name = "RS level",
       min = 0,
       max = 100,
-      default = 30,
+      default = 50,
       action = function(x)
           engine.rimshot_level(x/100)
-          redraw()
+          screen_dirty = true
       end
   }
 end

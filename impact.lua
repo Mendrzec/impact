@@ -4,6 +4,7 @@
 -- 8 track drum machine
 
 local ui = require "ui"
+local music = require "musicutil"
 
 engine.name = "Impact"
 
@@ -262,6 +263,7 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
   for key,value in ipairs(track_params) do
     object.track_params[key] = {
       param_id = value.param_id,
+      draw_note = value.draw_note,
       dial_x = object.screen_x,
       dial_y = object.screen_y - 6 - (self.max_params_count - key + 1) * 16,
       dial = nil,
@@ -269,7 +271,7 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       track_value = params:get(value.param_id),
 
       set = function(v) params:set(value.param_id, v) end,
-      reset = function(self) self.set(self.track_value) end,
+      reset = function(self) self.set(self.track_value, false) end,
       get = function() return params:get(value.param_id) end,
       track_param_delta = function(self, d)
         self.track_value = util.clamp(self.track_value + d, self.range[1], self.range[2])
@@ -277,7 +279,8 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
       end,
       dial_redraw = function(self)
         if self.dial == nil then
-          self.dial = ui.Dial.new(self.dial_x, self.dial_y, 8, self.track_value, self.range[1], self.range[2], 1, self.range[1], {}, nil, nil)
+          self.dial = ui.Dial.new(self.dial_x, self.dial_y, 8, self.track_value, self.range[1], self.range[2], 1, self.range[1],
+              {}, nil, self.draw_note and music.note_num_to_name(self.track_value) or nil)
         end
 
         if current_mode == mode.STEP_EDIT and step_editor.currently_pressed_step and step_editor.current_track == object.index then
@@ -285,9 +288,11 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
           local step_params = object.patterns[pattern_selector.current_pattern].sequence[step_editor.currently_pressed_step].step_params
           local param = step_params[key]
           if param ~=nil then
+            self.dial.title = self.draw_note and music.note_num_to_name(param.value, true) or nil
             self.dial:set_value(param.value)
             ui_utils.draw_dot(self.dial_x -2, self.dial_y, 15)
           else
+            self.dial.title = self.draw_note and music.note_num_to_name(self.track_value, true) or nil
             self.dial:set_value(self.track_value)
           end
           self.dial:redraw()
@@ -295,10 +300,15 @@ function InstrumentData:new(index, name, gx, gy, sx, sy, track_params, callback)
         end
 
         self.dial.active = object.focused
-        self.dial:set_value(self.get())
+        self.dial.title = self.draw_note and music.note_num_to_name(self.track_value, true) or nil
+        self.dial:set_value(self.track_value)
         self.dial:redraw()
       end
     }
+    -- TODO fix this hack
+    -- init engine values hack
+    object.track_params[key]:track_param_delta(-1)
+    object.track_params[key]:track_param_delta(1)
   end
 
   object.trigger_button = {
@@ -561,7 +571,7 @@ function init_tracks_data()
     InstrumentData:new(1,"BD", 1,8, 11, 64,
       {
         {param_id = "BD level"},
-        {param_id = "BD tone"},
+        {param_id = "BD tone", draw_note = true},
         {param_id = "BD decay"}
       },
       function(self)
@@ -571,9 +581,9 @@ function init_tracks_data()
     InstrumentData:new(2,"SD", 2,8, 26, 64,
       {
         {param_id = "SD level"},
-        -- {param_id = "SD tone"},
-        {param_id = "SD decay"},
-        {param_id = "SD snappy"}
+        {param_id = "SD snappy"},
+        -- {param_id = "SD tone", draw_note = true},
+        {param_id = "SD decay"}
       },
       function(self)
         engine.snare_trigger()
@@ -582,7 +592,7 @@ function init_tracks_data()
     InstrumentData:new(3,"MT", 3,8, 41, 64,
       {
         {param_id = "MT level"},
-        {param_id = "MT tone"},
+        {param_id = "MT tone", draw_note = true},
         {param_id = "MT decay"}
       },
       function(self)
@@ -592,7 +602,7 @@ function init_tracks_data()
     InstrumentData:new(4,"CH", 4,8, 56, 64,
       {
         {param_id = "CH level"},
-        {param_id = "CH tone"},
+        {param_id = "CH tone", draw_note = true},
         {param_id = "CH decay"}
       },
       function(self)
@@ -602,7 +612,7 @@ function init_tracks_data()
   InstrumentData:new(5,"OH", 5,8, 71, 64,
       {
         {param_id = "OH level"},
-        {param_id = "OH tone"},
+        {param_id = "OH tone", draw_note = true},
         {param_id = "OH decay"}
       },
       function(self)
@@ -852,9 +862,9 @@ function init()
   screen.aa(0)
   screen.line_width(1)
 
-  norns.enc.sens(1, 3)
-  norns.enc.sens(2, 3)
-  norns.enc.sens(3, 3)
+  norns.enc.sens(1, 4)
+  norns.enc.sens(2, 6)
+  norns.enc.sens(3, 5)
 
   -- clock management
   clk_midi.event = function(data)
