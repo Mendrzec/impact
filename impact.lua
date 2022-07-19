@@ -10,6 +10,7 @@ engine.name = "Impact"
 
 local impact_params = include("lib/impact_params")
 local ui_utils = include("lib/ui_utils")
+local table_utils = include("lib/table_utils")
 
 local grid = include("midigrid/lib/mg_128")
 local g = grid.connect()
@@ -17,28 +18,6 @@ local g = grid.connect()
 local MIDI_Clock = require "beatclock"
 clk = MIDI_Clock.new() -- global for impact_params how to fix that?
 local clk_midi = midi.connect()
-
-function table.shift(t, n)
-  if n > 0 then
-    for i=1,n do
-      table.insert(t, 1, table.remove(t, #t))
-    end
-  elseif n < 0 then
-    for i=1,math.abs(n) do
-      table.insert(t, table.remove(t, 1))
-    end
-  else
-    return false
-  end
-  return true
-end
-
-function table.contains(t, element)
-  for _, value in pairs(t) do
-    if value == element then return true end  
-  end
-  return false
-end
 
 -- TODO clean up globals
 -- globals
@@ -60,7 +39,63 @@ function cleanup()
   clock.cancel(flash_timer)
 end
 
-local erase_engaged = false
+local utility_mode = {
+  NONE = 1,
+  ERASE = 2,
+  COPY = 3,
+  SAVE = 4,
+  current = NONE,
+
+  set_none = function (self)
+    self.current = self.NONE
+  end,
+  is_erase = function (self)
+    return self.current == self.ERASE
+  end,
+  set_erase = function (self)
+    self.current = self.ERASE
+  end,
+  is_copy = function (self)
+    return self.current == self.COPY
+  end,
+  set_copy = function (self)
+    self.current = self.COPY
+  end
+}
+local clipboard = {
+  track = nil,
+  pattern = nil,
+
+  store_track = function (self, track)
+    self.track = track
+    self.pattern = nil
+  end,
+  has_track = function (self, track) -- track is optional
+    if track then
+      return self.track == track
+    else
+      return self.track ~= nil
+    end
+  end,
+  store_pattern = function (self, pattern)
+    self.pattern = pattern
+    self.track = nil
+  end,
+  has_pattern = function (self, pattern) -- pattern is optional
+    if pattern then
+      return self.pattern == pattern
+    else
+      return self.pattern ~= nil
+    end
+  end,
+  clear = function (self)
+    self.pattern = nil
+    self.track = nil
+  end,
+  empty = function (self)
+    return self.pattern == nil and self.track == nil
+  end
+}
 
 local playback_mode = {
   STOPPED = 4,
@@ -80,6 +115,7 @@ local color = {
   PRESSED = 15,
 }
 
+-- merge those vars as done in see. utility_mode
 local current_playback_mode = playback_mode.STOPPED
 local current_recording_mode = recording_mode.NOT_RECORDING
 
@@ -92,6 +128,7 @@ local mode = {
     PATTERN_SELECTION = 1,
     STEP_EDIT = 2
 }
+-- merge those vars as done in see. utility_mode
 local current_mode = mode.STEP_EDIT
 local pattern_selector = {
   selected_to_play_next_color = 3,
@@ -113,7 +150,7 @@ local pattern_selector = {
     for i=1,self.total_patterns do
       self.longest_track_in_pattern[i] = 1
     end
-    
+
     -- init grid_xy_to_pattern_map
     local ptrn_index2 = 1
     local grid_y_end = (self.grid_start_y + self.grid_rows - 1)
@@ -443,7 +480,14 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
     grid_x = object.grid_x,
     grid_y = object.grid_y - 1,
     pressed = false,
-    pattern_erased_flash = false,
+    timer = nil,
+
+    run_timer = function (self)
+      self.timer = clock.run(function (self)
+        clock.sleep(1.5)
+        self.timer = nil
+      end, self)
+    end,
 
     on_press = function (self)
       self.pressed = true
@@ -451,16 +495,30 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
         object.muted = not object.muted
         return
       end
-      if erase_engaged then
-        erase_engaged = false
+      if utility_mode:is_erase() then
+        utility_mode:set_none()
         local current_pattern = pattern_selector.current_pattern
         object.patterns[current_pattern] = Pattern:new(current_pattern)
+        self:run_timer()
+        return
+      end
 
-        self.pattern_erased_flash = true
-        clock.run(function (self)
-            clock.sleep(1.5)
-            self.pattern_erased_flash = false
-        end, self)
+      if utility_mode:is_copy() then
+        if clipboard:empty() then
+          clipboard:store_track(object.patterns[pattern_selector.current_pattern])
+        elseif clipboard:has_track() then
+          -- if clipboard track is different than current then copy
+          if not clipboard:has_track(object.patterns[pattern_selector.current_pattern]) then
+            object.patterns[pattern_selector.current_pattern] = table_utils.deepcopy(clipboard.track)
+            object.patterns[pattern_selector.current_pattern].index = pattern_selector.current_pattern
+            object.patterns[pattern_selector.current_pattern]:reset_step_params()
+
+          end
+
+          clipboard:clear()
+          utility_mode:set_none()
+          self:run_timer()
+        end
         return
       end
 
@@ -478,8 +536,18 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
       end
     end,
     get_grid_color = function(self)
-      if self.pressed or erase_engaged and flash_slow or self.pattern_erased_flash and flash_fast then
+      if self.pressed then
         return color.PRESSED
+      elseif self.timer then
+        return flash_fast and color.PRESSED or color.DEFAULT
+      elseif clipboard:has_track(object.patterns[pattern_selector.current_pattern]) then
+        return flash_fast and color.PRESSED or color.DEFAULT
+      elseif utility_mode:is_erase() then
+        return flash_slow and color.PRESSED or color.DEFAULT
+      elseif clipboard:has_track() then
+        return flash_slow and color.PRESSED or color.DEFAULT
+      elseif utility_mode:is_copy() and clipboard:empty() then
+        return flash_slow and color.PRESSED or color.DEFAULT
       else
         return color.DEFAULT
       end
@@ -541,7 +609,7 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
         return false
       end
       self.current_fill = fill
-      table.shift(self.partial_steps, self.current_offset)
+      table_utils.shift(self.partial_steps, self.current_offset)
       return true
     end,
     edit_fill = function (self, fill)
@@ -553,7 +621,7 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
       end
     end,
     set_offset = function (self, offset)
-      if table.shift(self.partial_steps, offset - self.current_offset) then
+      if table_utils.shift(self.partial_steps, offset - self.current_offset) then
         self.current_offset = offset
       end
     end,
@@ -602,7 +670,7 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
       if last_step_pressed then
         self.pattern.last_step = self.index
         self.pattern.end_step = self.index
-        
+
         pattern_selector:evaluate_longest_track()
         return
       end
@@ -653,7 +721,6 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
   Pattern = {
     index = nil,
     pressed = false,
-    pattern_erased = false,
 
     current_step = 1,
     begin_step = 1,
@@ -667,6 +734,14 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
     roll_enabled = false,
     rolled_steps = 0,
 
+    timer = nil,
+    run_timer = function (self)
+      self.timer = clock.run(function (self)
+        clock.sleep(1.5)
+        self.timer = nil
+      end, self)
+    end,
+
     new = function (self, index)
       local o = {}
       setmetatable(o, self)
@@ -679,7 +754,14 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
       end
       return o
     end,
-    
+
+    reset_step_params = function (self)
+      for _, step in pairs(self.sequence) do
+        step.step_params = {}
+        step.edited_params = false
+      end
+    end,
+
     reset_pattern_data = function (self)
       self.current_step = 1
       self.begin_step = 1
@@ -723,15 +805,33 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
     on_press = function (self)
       self.pressed = true
 
-      if erase_engaged then
-        erase_engaged = false
+      if utility_mode:is_erase() then
+        utility_mode:set_none()
         self:reset_pattern_data()
-        self.pattern_erased_flash = true
-        clock.run(function (self)
-            clock.sleep(1.5)
-            self.pattern_erased_flash = false
-        end, self)
+        self:run_timer()
         return
+      end
+
+      if utility_mode:is_copy() then
+        if clipboard:empty() then
+          clipboard:store_pattern(self.index)
+          return
+        elseif clipboard:has_pattern() then
+          -- if clipboard pattern is different than this then copy
+          if not clipboard:has_pattern(self.index) then
+            for _, track_data in pairs(tracks_data) do
+              track_data.patterns[self.index] = table_utils.deepcopy(track_data.patterns[clipboard.pattern])
+              track_data.patterns[self.index].index = self.index
+              track_data.patterns[self.index]:reset_step_params()
+            end
+          end
+          -- after copy, THIS pattern (self) is no longer accessed anywhere therefore
+          -- run_timer() must be called on fresh copy
+          tracks_data[step_editor.current_track].patterns[self.index]:run_timer()
+          clipboard:clear()
+          utility_mode:set_none()
+          return
+        end
       end
 
       pattern_selector.selected_pattern = self.index
@@ -743,14 +843,22 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
       self.pressed = false
     end,
     get_grid_color = function (self)
-      local erase_enaged_flash = erase_engaged and flash_slow
-      local pattern_erased_flash =  self.pattern_erased_flash and flash_fast
-      if self.pressed or erase_enaged_flash or pattern_erased_flash then
+      if self.pressed then
         return color.PRESSED
-      elseif pattern_selector.current_pattern == self.index and not self.pattern_erased_flash then
+      elseif self.timer then
+        return flash_fast and color.PRESSED or color.DEFAULT
+      elseif clipboard:has_pattern(self.index) then
+        return flash_fast and color.PRESSED or color.DEFAULT
+      elseif utility_mode:is_erase() then
+        return flash_slow and color.PRESSED or color.DEFAULT
+      elseif clipboard:has_pattern() then
+        return flash_slow and color.PRESSED or color.DEFAULT
+      elseif utility_mode:is_copy() and clipboard:empty() then
+        return flash_slow and color.PRESSED or color.DEFAULT
+      elseif pattern_selector.current_pattern == self.index then
         return pattern_selector.currently_playing_color
-      elseif pattern_selector.selected_pattern == self.index and flash_slow then
-        return pattern_selector.selected_to_play_next_color
+      elseif pattern_selector.selected_pattern == self.index then
+        return flash_slow and pattern_selector.selected_to_play_next_color or color.DEFAULT
       else
         return color.DEFAULT
       end
@@ -961,7 +1069,7 @@ function init_utility_buttons()
           return true
         end
 
-        return table.contains(self.valid_modes, current_mode)
+        return table_utils.contains(self.valid_modes, current_mode)
       end,
 
       on_press = function (self)
@@ -986,16 +1094,79 @@ function init_utility_buttons()
       grid_x = 6,
       grid_y = 1,
       pressed = false,
+      timer = nil,
+
+      run_timer = function (self)
+        self.timer = clock.run(function (self)
+          clock.sleep(0.75)
+          self.timer = nil
+        end, self)
+      end,
       on_press = function (self)
         self.pressed = true
       end,
       on_release = function (self)
         self.pressed = false
-        erase_engaged = not erase_engaged
+        if current_playback_mode ~= playback_mode.STOPPED then
+          self:run_timer()
+          return
+        end
+
+        if not utility_mode:is_erase() then
+          utility_mode:set_erase()
+        else
+          utility_mode:set_none()
+        end
       end,
       get_grid_color = function (self)
-        if self.pressed or erase_engaged and flash_slow then
+        if self.pressed then
           return color.PRESSED
+        elseif self.timer then
+          return flash_fast and color.PRESSED or color.DEFAULT
+        elseif utility_mode:is_erase() then
+          return flash_slow and color.PRESSED or color.DEFAULT
+        else
+          return color.DEFAULT
+        end
+      end
+    },
+    {
+      name = "copy",
+      grid_x = 7,
+      grid_y = 1,
+      pressed = false,
+      timer = nil,
+
+      run_timer = function (self)
+        self.timer = clock.run(function (self)
+          clock.sleep(0.75)
+          self.timer = nil
+        end, self)
+      end,
+      on_press = function (self)
+        self.pressed = true
+      end,
+      on_release = function (self)
+        self.pressed = false
+        if current_playback_mode ~= playback_mode.STOPPED then
+          self:run_timer()
+          return
+        end
+
+        if not utility_mode:is_copy() then
+          utility_mode:set_copy()
+        else
+          utility_mode:set_none()
+        end
+        clipboard:clear()
+      end,
+      get_grid_color = function (self)
+        if self.pressed then
+          return color.PRESSED
+        elseif self.timer then
+          return flash_fast and color.PRESSED or color.DEFAULT
+        elseif utility_mode:is_copy() then
+          return flash_slow and color.PRESSED or color.DEFAULT
         else
           return color.DEFAULT
         end
@@ -1219,7 +1390,7 @@ function execute_partial_step()
       pattern.current_step = pattern.current_step + 1
       if pattern.current_step > pattern.end_step then
         pattern.current_step = pattern.begin_step
-        
+
         if pattern_selector:is_longest_track_in_current_pattern(track.index) and pattern_selector.selected_pattern ~= pattern_selector.current_pattern then
           change_pattern = true
         end
@@ -1267,9 +1438,11 @@ function redraw()
   local pressed_step = step_editor.currently_pressed_step
   if pressed_step == nil then
     ui_utils.draw_inv_value(54, 6, string.format("P:%02d", pattern_selector.current_pattern), current_mode == mode.PATTERN_SELECTION, false, 2, 2)
-    ui_utils.draw_inv_value(74, 6, string.format("T:%d", step_editor.current_track), current_mode == mode.STEP_EDIT, false, 2, 2)
-    local current_pattern = tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern]
-    ui_utils.draw_pages(89, 6, step_editor.current_page, current_pattern.current_step, current_pattern.last_step, step_editor.pattern_follow)
+    if current_mode == mode.STEP_EDIT then
+      ui_utils.draw_inv_value(74, 6, string.format("T:%d", step_editor.current_track), true, false, 2, 2)
+      local current_pattern = tracks_data[step_editor.current_track].patterns[pattern_selector.current_pattern]
+      ui_utils.draw_pages(89, 6, step_editor.current_page, current_pattern.current_step, current_pattern.last_step, step_editor.pattern_follow)
+    end
   else
     ui_utils.draw_inv_value(54, 6, "S:" .. tostring(pressed_step < 10 and "0" or "") .. tostring(pressed_step), true, false, 2, 2)
     ui_utils.draw_inv_value(74, 6, "FILL", true, false, 2, 2)
@@ -1289,7 +1462,12 @@ function redraw()
     screen.aa(0)
 
     ui_utils.draw_track_vertical_line(track_data.screen_x, key == 1)
-    ui_utils.draw_inv_label(track_data.screen_x, track_data.screen_y, track_data.name, step_editor.current_track == key, track_data.muted)
+    ui_utils.draw_inv_label(
+        track_data.screen_x,
+        track_data.screen_y,
+        track_data.name,
+        step_editor.current_track == key and current_mode == mode.STEP_EDIT,
+        track_data.muted)
 
     screen.stroke()
   end
