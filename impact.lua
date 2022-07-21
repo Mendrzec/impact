@@ -44,8 +44,11 @@ local utility_mode = {
   ERASE = 2,
   COPY = 3,
   SAVE = 4,
-  current = NONE,
+  current = 1,
 
+  is_none = function (self)
+    return self.current == self.NONE
+  end,
   set_none = function (self)
     self.current = self.NONE
   end,
@@ -755,6 +758,22 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
       return o
     end,
 
+    extend = function (self)
+      local steps_to_copy = self.last_step % 16 == 0 and 16 or self.last_step
+      for i=1,steps_to_copy do
+        if self.last_step < self.max_step then
+          self.last_step = self.last_step + 1
+        else
+          break
+        end
+        local dont_copy = {}
+        dont_copy[self] = self
+        self.sequence[self.last_step] = table_utils.deepcopy(self.sequence[i], dont_copy)
+        self.sequence[self.last_step].index = self.last_step
+      end
+      self.end_step = self.last_step
+    end,
+
     reset_step_params = function (self)
       for _, step in pairs(self.sequence) do
         step.step_params = {}
@@ -1094,21 +1113,13 @@ function init_utility_buttons()
       grid_x = 6,
       grid_y = 1,
       pressed = false,
-      timer = nil,
 
-      run_timer = function (self)
-        self.timer = clock.run(function (self)
-          clock.sleep(0.75)
-          self.timer = nil
-        end, self)
-      end,
       on_press = function (self)
         self.pressed = true
       end,
       on_release = function (self)
         self.pressed = false
         if current_playback_mode ~= playback_mode.STOPPED then
-          self:run_timer()
           return
         end
 
@@ -1119,10 +1130,10 @@ function init_utility_buttons()
         end
       end,
       get_grid_color = function (self)
-        if self.pressed then
+        if current_playback_mode ~= playback_mode.STOPPED then
+          return color.DISABLED
+        elseif self.pressed then
           return color.PRESSED
-        elseif self.timer then
-          return flash_fast and color.PRESSED or color.DEFAULT
         elseif utility_mode:is_erase() then
           return flash_slow and color.PRESSED or color.DEFAULT
         else
@@ -1135,21 +1146,13 @@ function init_utility_buttons()
       grid_x = 7,
       grid_y = 1,
       pressed = false,
-      timer = nil,
 
-      run_timer = function (self)
-        self.timer = clock.run(function (self)
-          clock.sleep(0.75)
-          self.timer = nil
-        end, self)
-      end,
       on_press = function (self)
         self.pressed = true
       end,
       on_release = function (self)
         self.pressed = false
         if current_playback_mode ~= playback_mode.STOPPED then
-          self:run_timer()
           return
         end
 
@@ -1161,12 +1164,56 @@ function init_utility_buttons()
         clipboard:clear()
       end,
       get_grid_color = function (self)
-        if self.pressed then
+        if current_playback_mode ~= playback_mode.STOPPED then
+          return color.DISABLED
+        elseif self.pressed then
+          return color.PRESSED
+        elseif utility_mode:is_copy() then
+          return flash_slow and color.PRESSED or color.DEFAULT
+        else
+          return color.DEFAULT
+        end
+      end
+    },
+    {
+      name = "extend",
+      grid_x = 8,
+      grid_y = 1,
+      pressed = false,
+      timer = nil,
+
+      run_timer = function (self)
+        self.timer = clock.run(function (self)
+          clock.sleep(1)
+          self.timer = nil
+        end, self)
+      end,
+      on_press = function (self)
+        self.pressed = true
+      end,
+      on_release = function (self)
+        self.pressed = false
+        if current_playback_mode ~= playback_mode.STOPPED or current_mode == mode.PATTERN_SELECTION then
+          return
+        end
+
+        if currently_focused_track ~= nil then
+          tracks_data[currently_focused_track].patterns[pattern_selector.current_pattern]:extend()
+        else
+          for _, track_data in pairs(tracks_data) do
+            track_data.patterns[pattern_selector.current_pattern]:extend()
+          end
+        end
+        self:run_timer()
+      end,
+
+      get_grid_color = function (self)
+        if current_playback_mode ~= playback_mode.STOPPED or current_mode == mode.PATTERN_SELECTION then
+          return color.DISABLED
+        elseif self.pressed then
           return color.PRESSED
         elseif self.timer then
           return flash_fast and color.PRESSED or color.DEFAULT
-        elseif utility_mode:is_copy() then
-          return flash_slow and color.PRESSED or color.DEFAULT
         else
           return color.DEFAULT
         end
