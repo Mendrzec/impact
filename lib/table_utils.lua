@@ -65,4 +65,20 @@ function table_utils.dump(o, already_printed)
   end
 end
 
+function table_utils.set_table(dst, src, recursive_tables)
+  -- recursive tables are not coppied
+  recursive_tables = recursive_tables or {}
+  recursive_tables[src] = src
+
+  for key, value in pairs(src) do
+    if type(value) == 'table' then
+      if not recursive_tables[value] then
+        table_utils.set_table(dst[key], value, recursive_tables)
+      end
+    else
+      dst[key] = value
+    end
+  end
+end
+
 return table_utils

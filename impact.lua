@@ -1,5 +1,5 @@
 -- impact
--- v1.0.0 @Mendrzec
+-- v1.1.0 @Mendrzec
 --
 -- 8 track drum machine
 
@@ -799,6 +799,9 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
     set_roll = function (self, roll)
       if roll == 4 or roll == 2 then
         local beat_step_base = math.floor(self.current_step / roll) * roll
+        if self.current_step == beat_step_base then
+          beat_step_base = beat_step_base - roll
+        end
         self.begin_step = beat_step_base + 1
         self.end_step = util.clamp(beat_step_base + roll, 1, self.last_step)
       elseif roll == 1 then
@@ -826,7 +829,9 @@ function TrackData:new(index, name, gx, gy, sx, sy, track_params, callback)
 
       if utility_mode:is_erase() then
         utility_mode:set_none()
-        self:reset_pattern_data()
+        for _, track_data in pairs(tracks_data) do
+          track_data.patterns[self.index]:reset_pattern_data()
+        end
         self:run_timer()
         return
       end
@@ -1093,18 +1098,21 @@ function init_utility_buttons()
 
       on_press = function (self)
         if not self:valid_in_current_mode() then return end
+        if current_playback_mode ~= playback_mode.STOPPED then return end
 
         self.pressed = true
         last_step_pressed = true
       end,
       on_release = function (self)
         if not self:valid_in_current_mode() then return end
+        if current_playback_mode ~= playback_mode.STOPPED then return end
 
         self.pressed = false
         last_step_pressed = false
       end,
       get_grid_color = function (self)
         if not self:valid_in_current_mode() then return color.DISABLED end
+        if current_playback_mode ~= playback_mode.STOPPED then return color.DISABLED end
         return self.pressed and color.PRESSED or color.DEFAULT
       end
     },
@@ -1367,6 +1375,24 @@ function init()
   -- clk.on_start = reset_sequence
 
   impact_params:init()
+  params.action_write = function(filename,name)
+    print("finished writing '"..filename.."' as '"..name.."'")
+    os.execute("mkdir -p ".._path.data..'/impact/'..name..'/')
+    tab.save(tracks_data, _path.data..'/impact/'..name..'/tracks_data.data')
+  end
+  params.action_read = function(filename)
+    print("finished reading '"..filename.."'")
+    local loaded_file = io.open(filename, "r")
+    if loaded_file then
+      io.input(loaded_file)
+      local pset_name = string.sub(io.read(), 4, -1) -- grab the PSET name from the top of the PSET file
+      io.close(loaded_file)
+      init_tracks_data()
+      tdata = tab.load(_path.data..'/impact/'..pset_name..'/tracks_data.data')
+      table_utils.set_table(tracks_data, tdata)
+    end
+  end
+
   init_tracks_data() -- TODO move into method like step_editor:init() and other
   init_utility_buttons()
 
