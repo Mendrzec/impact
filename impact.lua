@@ -12,7 +12,7 @@ local impact_params = include("lib/impact_params")
 local ui_utils = include("lib/ui_utils")
 local table_utils = include("lib/table_utils")
 
-local grid = include("midigrid/lib/mg_128")
+--local grid = include("midigrid/lib/mg_128")
 local g = grid.connect()
 
 local MIDI_Clock = require "beatclock"
